@@ -7,8 +7,7 @@ Script integral para configuración, instalación y ejecución de XTTS WebUI
 en entornos locales con manejo robusto de errores y rutas alternativas.
 
 Autor: Alexander
-Fecha: 24-03-2025
-Versión: 1.1.0
+Versión: 1.2.0
 """
 
 import os
@@ -23,6 +22,8 @@ import platform
 import tempfile
 import json
 import traceback
+import re
+import glob
 
 # Configuración de logging con formato mejorado
 logging.basicConfig(
@@ -74,6 +75,7 @@ config_state = {
     "patched": False,
     "last_run": None,
     "python_exe": None,
+    "main_script": None,
     "error_log": [],
 }
 
@@ -331,6 +333,93 @@ def clone_repository():
                     "No se pudo obtener el repositorio. Verifique su conexión a Internet"
                 )
                 sys.exit(1)
+
+
+def find_main_script():
+    """Identifica el archivo principal de la aplicación"""
+    # Candidatos típicos para el punto de entrada
+    script_candidates = [
+        "xtts_demo.py",
+        "app.py",
+        "webui.py",
+        "main.py",
+        "server.py",
+        "run.py",
+        "gradio_app.py",
+    ]
+
+    # 1. Buscar archivos candidatos directos
+    for candidate in script_candidates:
+        if os.path.exists(os.path.join(XTTS_DIR, candidate)):
+            logger.info(f"✓ Archivo principal detectado: {candidate}")
+            config_state["main_script"] = candidate
+            return candidate
+
+    # 2. Buscar por contenido (archivos que importen gradio y definan una interfaz)
+    logger.info("Buscando archivo principal por contenido...")
+    for py_file in glob.glob(os.path.join(XTTS_DIR, "*.py")):
+        try:
+            with open(py_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                # Buscar patrones comunes en aplicaciones Gradio
+                if re.search(r"import\s+gradio", content) and re.search(
+                    r"(gr\.Interface|\.launch\()", content
+                ):
+                    main_script = os.path.basename(py_file)
+                    logger.info(
+                        f"✓ Archivo principal identificado por contenido: {main_script}"
+                    )
+                    config_state["main_script"] = main_script
+                    return main_script
+        except Exception as e:
+            logger.debug(f"Error al analizar {py_file}: {e}")
+
+    # 3. Verificar si hay solo un archivo Python en el directorio
+    py_files = glob.glob(os.path.join(XTTS_DIR, "*.py"))
+    if len(py_files) == 1:
+        main_script = os.path.basename(py_files[0])
+        logger.info(
+            f"✓ Un solo archivo Python encontrado, usando como principal: {main_script}"
+        )
+        config_state["main_script"] = main_script
+        return main_script
+
+    # 4. Buscar cualquier archivo que mencione TTS y Gradio
+    for py_file in glob.glob(os.path.join(XTTS_DIR, "*.py")):
+        try:
+            with open(py_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                if "TTS" in content and "gradio" in content:
+                    main_script = os.path.basename(py_file)
+                    logger.info(
+                        f"✓ Posible archivo principal identificado: {main_script}"
+                    )
+                    config_state["main_script"] = main_script
+                    return main_script
+        except Exception:
+            pass
+
+    # Si no se puede determinar, listar todos los archivos Python
+    logger.warning("⚠️ No se pudo identificar el archivo principal de la aplicación")
+    logger.info("Archivos Python disponibles:")
+    for py_file in sorted(py_files):
+        logger.info(f"  - {os.path.basename(py_file)}")
+
+    # Por defecto, usar app.py si existe
+    if os.path.exists(os.path.join(XTTS_DIR, "app.py")):
+        logger.info("✓ Usando app.py como archivo principal por defecto")
+        config_state["main_script"] = "app.py"
+        return "app.py"
+
+    # Si hay archivos Python disponibles, usar el primero
+    if py_files:
+        main_script = os.path.basename(py_files[0])
+        logger.info(f"✓ Usando el primer archivo Python disponible: {main_script}")
+        config_state["main_script"] = main_script
+        return main_script
+
+    logger.error("❌ No se encontraron archivos Python en el repositorio")
+    return "app.py"  # Valor por defecto en caso de error
 
 
 def create_virtual_environment():
@@ -833,6 +922,11 @@ def create_launcher_script(python_exe):
     """Crea un script de lanzamiento para facilitar la ejecución con manejo de errores"""
     launcher_path = BASE_DIR / "ejecutar_xtts.py"
 
+    # Detectar el script principal si no se ha hecho antes
+    main_script = config_state.get("main_script")
+    if not main_script:
+        main_script = find_main_script()
+
     launcher_code = f"""#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 \"\"\"
@@ -858,10 +952,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("XTTS-Runtime")
 
+# Variables globales
+process = None
+
 def signal_handler(sig, frame):
     \"\"\"Manejador de señal para SIGINT (Ctrl+C)\"\"\"
     logger.info("\\n⚠️ Recibida señal de interrupción. Finalizando de forma segura...")
-    if 'process' in globals() and process:
+    if process:
         process.terminate()
         try:
             process.wait(timeout=5)
@@ -870,6 +967,19 @@ def signal_handler(sig, frame):
             logger.warning("El proceso no terminó tras 5 segundos, forzando finalización...")
             process.kill()
     sys.exit(0)
+
+def apply_compatibility_patch():
+    \"\"\"Aplica el parche de compatibilidad de manera programática\"\"\"
+    try:
+        import transformers
+        from transformers.generation.logits_process import LogitsProcessor
+        if not hasattr(transformers, 'LogitsWarper'):
+            setattr(transformers, 'LogitsWarper', LogitsProcessor)
+            logger.info("✓ Parche dinámico aplicado correctamente")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Error al aplicar parche dinámico: {{e}}")
+        return False
 
 def main():
     \"\"\"Función principal para ejecutar XTTS WebUI\"\"\"
@@ -887,25 +997,23 @@ def main():
         # Agregar directorio al path
         sys.path.insert(0, project_dir)
         
-        # Importar módulo de compatibilidad
+        # Importar o aplicar parche de compatibilidad
+        compatibility_loaded = False
         try:
-            sys.path.insert(0, os.path.join(project_dir, "utils"))
-            from compatibility import *
+            compatibility_path = os.path.join(project_dir, "utils")
+            sys.path.insert(0, compatibility_path)
+            # Importación específica en lugar de import *
+            import compatibility
             logger.info("✓ Módulo de compatibilidad cargado correctamente")
+            compatibility_loaded = True
         except ImportError as e:
             logger.warning(f"⚠️ No se pudo cargar el módulo de compatibilidad: {{e}}")
             logger.info("Aplicando parche dinámico...")
-            
-            # Aplicar parche dinámico si falla la importación
-            try:
-                import transformers
-                from transformers.generation.logits_process import LogitsProcessor
-                if not hasattr(transformers, 'LogitsWarper'):
-                    setattr(transformers, 'LogitsWarper', LogitsProcessor)
-                    logger.info("✓ Parche dinámico aplicado correctamente")
-            except Exception as e2:
-                logger.error(f"❌ Error al aplicar parche dinámico: {{e2}}")
-                logger.warning("Algunas funcionalidades podrían no estar disponibles")
+            compatibility_loaded = apply_compatibility_patch()
+        
+        if not compatibility_loaded:
+            logger.warning("No se pudo aplicar el parche de compatibilidad")
+            logger.warning("Algunas funcionalidades podrían no estar disponibles")
         
         # Verificar modelo
         model_config = os.path.join(project_dir, "model", "config.json")
@@ -924,8 +1032,35 @@ def main():
         logger.info("🔗 La interfaz estará disponible en http://localhost:7860 cuando termine de cargar")
         logger.info("-------------------------------------------------------------------")
         
+        # Buscar el script principal
+        main_script = "{main_script}"
+        if not os.path.exists(os.path.join(project_dir, main_script)):
+            logger.warning(f"❌ No se encontró el archivo {{main_script}}")
+            
+            # Buscar alternativas
+            script_candidates = [
+                "app.py", "webui.py", "main.py", "server.py", "run.py", 
+                "gradio_app.py", "xtts_app.py", "xtts_demo.py"
+            ]
+            
+            for candidate in script_candidates:
+                if os.path.exists(os.path.join(project_dir, candidate)):
+                    main_script = candidate
+                    logger.info(f"✓ Usando archivo alternativo: {{main_script}}")
+                    break
+            else:
+                # Si no encuentra ninguno, listar todos los archivos Python
+                py_files = [f for f in os.listdir(project_dir) if f.endswith('.py')]
+                if py_files:
+                    main_script = py_files[0]
+                    logger.info(f"✓ Usando primer archivo Python disponible: {{main_script}}")
+                else:
+                    logger.error("❌ No se encontraron archivos Python en el directorio")
+                    sys.exit(1)
+        
         # Usar subprocess para mantener la interfaz abierta
-        cmd = ["{str(python_exe).replace(os.sep, '/')}", "xtts_demo.py", "--port", "7860"]
+        python_exe = "{str(python_exe).replace(os.sep, '/')}"
+        cmd = [python_exe, main_script, "--port", "7860"]
         logger.debug(f"Ejecutando comando: {{' '.join(cmd)}}")
         
         process = subprocess.Popen(
@@ -954,14 +1089,14 @@ def main():
     
     except KeyboardInterrupt:
         logger.info("\\n⚠️ Operación interrumpida por el usuario")
-        if 'process' in locals() and process:
+        if process:
             logger.info("Finalizando proceso...")
             process.terminate()
             process.wait()
     except Exception as e:
         logger.error(f"❌ Error inesperado: {{e}}")
         logger.error(traceback.format_exc())
-        if 'process' in locals() and process:
+        if process:
             process.terminate()
             process.wait()
         sys.exit(1)
@@ -1054,6 +1189,9 @@ def main():
         clone_repository()
         install_python_dependencies(python_exe)
 
+        # Detectar el script principal de la aplicación
+        main_script = find_main_script()
+
         # Descarga de recursos si es necesario
         if args.force_download or (
             not args.skip_download and not config_state.get("models_downloaded", False)
@@ -1084,7 +1222,7 @@ def main():
             )
         else:
             logger.info(
-                f"Para iniciar XTTS WebUI, navegue a {XTTS_DIR} y ejecute: {python_exe} xtts_demo.py --port 7860"
+                f"Para iniciar XTTS WebUI, navegue a {XTTS_DIR} y ejecute: {python_exe} {main_script} --port 7860"
             )
 
         logger.info("La interfaz estará disponible en http://localhost:7860")
