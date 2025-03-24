@@ -1,0 +1,72 @@
+# Configuración de .gitignore optimizada para XTTS WebUI
+
+# ===== Entornos virtuales =====
+venv/
+env/
+ENV/
+.env
+.venv
+virtualenv/
+
+# ===== Archivos de proyecto y modelos =====
+model/
+models/
+temp/
+*/model.zip
+*/vc.zip
+voice_samples/
+xtts-webui/model/
+outputs/
+output_audio/
+
+# ===== Archivos de Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ===== Archivos de logs y respaldos =====
+*.log
+*.backup
+*.bak
+*.tmp
+logs/
+.DS_Store
+Thumbs.db
+
+# ===== Directorios y archivos de IDEs =====
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.spyderproject
+.spyproject
+.ropeproject
+.ipynb_checkpoints/
+.project
+.pydevproject
+.settings/
+
+# ===== Archivos específicos del proyecto =====
+xtts_log.txt
+credentials.json
+config_local.py
+*.wav
+*.mp3
+*.ogg

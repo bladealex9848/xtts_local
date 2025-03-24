@@ -1,0 +1,30 @@
+# Dependencias principales con versiones específicas para XTTS WebUI
+# Última actualización: 24-03-2025
+
+# ===== Dependencias críticas con versiones específicas =====
+transformers==4.33.0             # Versión específica requerida para LogitsWarper
+pandas==1.5.3                    # Versión compatible con TTS y otras dependencias
+fastapi==0.103.1                 # Versión compatible con la interfaz
+pydantic==2.3.0                  # Requerida para validación de datos
+gradio==4.44.1                   # Interfaz web optimizada
+ctranslate2==4.4.0               # Motor de traducción
+
+# ===== Dependencias para procesamiento de voz =====
+TTS==0.22.0                      # Motor principal de síntesis de voz
+faster_whisper==1.0.3            # Transcripción optimizada de voz
+spacy==3.7.5                     # Procesamiento de lenguaje natural
+cutlet==0.5.0                    # Soporte para japonés
+fugashi[unidic-lite]==1.4.0      # Análisis morfológico japonés
+
+# ===== Dependencias para procesamiento de audio =====
+ffmpeg-python>=0.2.0             # Procesamiento de audio y video
+librosa>=0.10.0                  # Análisis de audio
+soundfile>=0.12.0                # Manipulación de archivos de audio
+pydub>=0.25.1                    # Manipulación de audio
+
+# ===== Utilidades y herramientas =====
+numpy>=1.20.0                    # Computación numérica
+scipy>=1.7.0                     # Algoritmos científicos
+matplotlib>=3.4.0                # Visualización de datos
+torch>=2.1.0                     # Framework de aprendizaje automático
+torchaudio>=2.1.0                # Procesamiento de audio para PyTorch
